@@ -18,6 +18,25 @@ classification_labels:
   restricted:
     description: Highest-risk data requiring strict need-to-know access, including pastoral-care notes, counseling-related
       content, minors/student records, credentials, security logs, and regulated personal information.
+model_memory_sizing:
+  formula: "INT4 uses 4 bits per parameter, so VRAM for weights only = parameters × 0.5 bytes. Convert to GiB by dividing bytes by 1024^3."
+  gpu_card: "48 GB VRAM card"
+  assumptions:
+    - "This calculation covers quantized weights only. Production serving also needs KV cache, CUDA/runtime workspace, tokenizer/runtime overhead, batching headroom, and the operating margin needed to avoid out-of-memory failures."
+    - "A model that fits by weight alone is not automatically approved for production serving."
+  models:
+    13B:
+      parameters: 13000000000
+      int4_weight_bytes: 6500000000
+      int4_weight_gib: 6.05
+      comparison_to_48gb_card: "Fits comfortably by weight size, leaving substantial VRAM for KV cache, runtime overhead, and normal inference headroom."
+      deployment_decision: "Approved for the current 48 GB serving card after normal functional and access-control checks."
+    70B:
+      parameters: 70000000000
+      int4_weight_bytes: 35000000000
+      int4_weight_gib: 32.60
+      comparison_to_48gb_card: "Weights alone fit on a 48 GB card, but the remaining VRAM margin is too tight for safe production RAG serving once KV cache, context length, batching, and runtime workspace are included."
+      deployment_decision: "Evaluation only on the current card; production requires lower batch/context settings, multi-GPU serving, or an 80 GB class GPU approval."
 assets:
 - name: 13B model weights
   classification: internal
@@ -31,10 +50,10 @@ assets:
 - name: 70B model weights
   classification: internal
   storage_tier: encrypted archive or evaluation storage only
-  retention: Keep for 90 days only during evaluation unless an 80 GB GPU deployment is approved; otherwise delete.
+  retention: Keep for 90 days only during evaluation unless a safe production serving plan is approved, such as lower batch/context settings, multi-GPU serving, or an 80 GB class GPU deployment; otherwise delete.
   disposition: Delete from active storage; retain evaluation notes and checksum if needed for audit.
-  lineage: Candidate base model calculated at INT4 for comparison against the 48 GB GPU.
-  rationale: The model does not fit the current 48 GB card once runtime memory is included, so keeping it active wastes space.
+  lineage: Candidate base model calculated at INT4 using 70B × 0.5 bytes = 35,000,000,000 bytes, about 32.60 GiB, for comparison against the 48 GB GPU.
+  rationale: The INT4 weights fit by size alone, but safe production serving on the current 48 GB card leaves too little headroom once KV cache, context length, batching, and runtime workspace are included. Keep it as evaluation-only unless a larger or multi-GPU serving plan is approved.
 - name: served model runtime and KV cache
   classification: restricted
   storage_tier: GPU VRAM and encrypted temporary runtime storage
@@ -115,3 +134,4 @@ review:
   audit_evidence_location: 'Restricted IT governance folder: /governance/ai-estate/project4/audit-evidence/'
   deletion_verification_method: Record deletion ticket, asset name, storage path, date, approver, and verification from storage
     logs or backup expiration report.
+
