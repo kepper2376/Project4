@@ -1,0 +1,117 @@
+# Project 4 governance policy.
+# Completed with concrete classifications, retention windows, disposition rules, and rationale.
+
+policy_name: Grace & Mercy Lutheran Ministries AI Estate Data Classification
+version: '1.0'
+owner: IT Steering Committee
+last_reviewed: '2026-07-08'
+classification_labels:
+  public:
+    description: Approved for public release, such as published worship schedules, public announcements, and already-posted
+      ministry web content.
+  internal:
+    description: Routine ministry business data for staff and authorized volunteers; not public but low harm if accidentally
+      disclosed.
+  confidential:
+    description: Sensitive operational data such as staff records, donor information, internal financial records, student-related
+      data, and nonpublic policy materials.
+  restricted:
+    description: Highest-risk data requiring strict need-to-know access, including pastoral-care notes, counseling-related
+      content, minors/student records, credentials, security logs, and regulated personal information.
+assets:
+- name: 13B model weights
+  classification: internal
+  storage_tier: fast encrypted local NVMe/SSD serving tier
+  retention: Keep current approved version while deployed; review every 12 months; delete superseded local copies within 90
+    days after replacement.
+  disposition: Preserve model name, license, source URL, checksum, and approval notes; securely delete duplicate binaries.
+  lineage: Downloaded approved base model, quantized to INT4, checksum recorded before deployment.
+  rationale: The weights are not ministry records, but license and integrity matter. They are reproducible, so unlimited local
+    copies are unnecessary.
+- name: 70B model weights
+  classification: internal
+  storage_tier: encrypted archive or evaluation storage only
+  retention: Keep for 90 days only during evaluation unless an 80 GB GPU deployment is approved; otherwise delete.
+  disposition: Delete from active storage; retain evaluation notes and checksum if needed for audit.
+  lineage: Candidate base model calculated at INT4 for comparison against the 48 GB GPU.
+  rationale: The model does not fit the current 48 GB card once runtime memory is included, so keeping it active wastes space.
+- name: served model runtime and KV cache
+  classification: restricted
+  storage_tier: GPU VRAM and encrypted temporary runtime storage
+  retention: Session only; clear on restart and do not intentionally persist beyond 24 hours.
+  disposition: Automatically purge process memory, temporary files, and cached prompt state after session end or service restart.
+  lineage: Generated during live inference from user prompts, retrieved context, and model state.
+  rationale: Runtime cache may contain sensitive prompts or retrieved restricted text, so it should be treated as high risk
+    and disposable.
+- name: vector database embeddings
+  classification: confidential
+  storage_tier: fast encrypted NVMe/SSD database tier
+  retention: Keep while the matching RAG corpus is active; rebuild or refresh at least annually; delete embeddings within
+    30 days when source documents are removed.
+  disposition: Securely delete stale partitions and rebuild from approved source corpus when needed.
+  lineage: Generated from chunked RAG source documents using the approved embedding model and chunking pipeline.
+  rationale: Embeddings can leak information about source content and are expensive to rebuild, so they need protected storage
+    and controlled retention.
+- name: HNSW vector index
+  classification: confidential
+  storage_tier: fast encrypted NVMe/SSD database tier
+  retention: Keep while the matching embedding table is active; rebuild after major corpus refreshes; delete within 30 days
+    of embedding deletion.
+  disposition: Drop and rebuild the index instead of archiving obsolete copies.
+  lineage: Derived from vector database embeddings using pgvector HNSW indexing.
+  rationale: The index is reproducible but performance-critical, so active copies belong on fast storage and stale copies
+    should not accumulate.
+- name: RAG source corpus
+  classification: restricted
+  storage_tier: encrypted warm storage with restricted access controls
+  retention: 'Retain official source documents according to ministry records schedule: 7 years for finance/HR records, 3 years
+    for general internal policy copies, and permanent retention for governing documents.'
+  disposition: Apply source-system retention rules; legal hold overrides deletion; securely delete unauthorized duplicates.
+  lineage: Original ministry, school, finance, policy, HR, and communications documents approved for retrieval use.
+  rationale: This is the irreplaceable evidence base for RAG and may contain sensitive student, donor, HR, and pastoral information.
+- name: fine-tuning source dataset
+  classification: restricted
+  storage_tier: encrypted restricted dataset repository
+  retention: Keep approved training dataset versions for 3 years after last model use; delete rejected drafts within 90 days.
+  disposition: Store versioned approved dataset with access logs; securely delete drafts and rejected examples.
+  lineage: Curated prompt-response records created from approved ministry policies, procedures, and reviewed example answers.
+  rationale: The dataset determines model behavior and may contain sensitive examples, so it is irreplaceable for audit but
+    risky if over-retained.
+- name: fine-tuned weights or adapters
+  classification: confidential
+  storage_tier: fast serving storage plus encrypted archive copy
+  retention: Keep the current approved adapter while deployed and one previous rollback version for 12 months; delete failed
+    experiments within 30 days.
+  disposition: Archive approved adapter with checksum, training dataset version, and approval notes; delete experimental checkpoints.
+  lineage: Produced by training from the approved base model and fine-tuning source dataset.
+  rationale: Approved adapters are needed for reproducibility and rollback, but failed experiments are reproducible and create
+    clutter.
+- name: application and query logs
+  classification: restricted
+  storage_tier: encrypted log storage or SIEM with role-based access
+  retention: Keep detailed logs for 180 days; keep aggregated metrics for 2 years; delete raw prompts and responses after
+    180 days unless under legal hold.
+  disposition: Rotate logs, redact where possible, aggregate metrics, and securely delete expired raw logs.
+  lineage: Generated by user queries, retrieval events, application errors, admin actions, and security monitoring.
+  rationale: Logs are useful for security and troubleshooting but become liability because they can contain sensitive prompts
+    and retrieved text.
+- name: embedding and indexing scratch space
+  classification: restricted
+  storage_tier: fast encrypted disposable NVMe scratch
+  retention: Keep only during active ingestion or index build; delete within 7 days after successful verification.
+  disposition: Automatically wipe temporary chunks, intermediate files, failed batch outputs, and duplicate exports.
+  lineage: Temporary files generated during document conversion, chunking, embedding, index building, and tuning jobs.
+  rationale: Scratch space often contains duplicated restricted content and is reproducible, so it should be short-lived.
+- name: backups and exports
+  classification: restricted
+  storage_tier: encrypted backup/archive storage separate from production
+  retention: Daily backups for 30 days, monthly backups for 12 months, annual compliance exports for 7 years when required.
+  disposition: Encrypt, test restore quarterly, expire old backups on schedule, and destroy media through approved secure
+    disposal.
+  lineage: Backup copies of approved source corpus, database exports, policies, audit evidence, and final approved adapters.
+  rationale: Backups protect irreplaceable records, but old exports are high-risk if forgotten or stored outside access controls.
+review:
+  review_frequency: Quarterly access and retention review; annual full policy review.
+  audit_evidence_location: 'Restricted IT governance folder: /governance/ai-estate/project4/audit-evidence/'
+  deletion_verification_method: Record deletion ticket, asset name, storage path, date, approver, and verification from storage
+    logs or backup expiration report.

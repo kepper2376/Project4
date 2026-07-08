@@ -1,0 +1,147 @@
+Project 4 - Size the AI Estate
+Grace & Mercy Lutheran Ministries
+
+AI usage line:
+I used AI help to critique wording, check arithmetic, and turn the assignment scaffold into a complete draft. The sizing assumptions, retention windows, tiering decisions, and keep/cast-away verdicts are stated here as my submitted plan and should be reviewed against my own course evidence before final submission.
+
+
+1. Model Sizing
+
+Chosen quantization:
+For the 13B model I chose INT4 quantization. INT4 uses 0.5 byte per parameter, which makes the model small enough to run on one mid-sized GPU while still being reasonable for an internal ministry RAG assistant where exact creative writing quality is less important than cost, speed, and privacy.
+
+For the 70B model I also calculated INT4 quantization so the comparison is fair and uses the smallest practical memory footprint. Even after INT4 compression, the 70B model is too large for a single 48 GB card once runtime memory is included, so I do not recommend it for the first deployment.
+
+Formula:
+weights on disk = parameters * bytes per weight
+
+13B candidate:
+parameters = 13,000,000,000
+bytes per weight = 0.5 byte using INT4
+weights on disk = 13,000,000,000 * 0.5 = 6,500,000,000 bytes = 6.5 GB, about 6.05 GiB
+runtime additions considered = KV cache + framework overhead + concurrency
+estimated deployed VRAM = 6.5 GB weights + 8 GB KV cache + 2 GB framework/runtime overhead + 3.5 GB concurrency margin = about 20 GB
+smallest GPU class that can serve it = 24 GB GPU class
+does the school's 48 GB card suffice? Yes. A 48 GB card gives about 28 GB of headroom after the estimated 20 GB deployment, so the 13B model is the practical choice.
+
+70B candidate:
+parameters = 70,000,000,000
+bytes per weight = 0.5 byte using INT4
+weights on disk = 70,000,000,000 * 0.5 = 35,000,000,000 bytes = 35 GB, about 32.60 GiB
+runtime additions considered = KV cache + framework overhead + concurrency
+estimated deployed VRAM = 35 GB weights + 16 GB KV cache + 6 GB framework/runtime overhead + 8 GB concurrency margin = about 65 GB
+smallest GPU class that can serve it = 80 GB GPU class or a multi-GPU setup
+does the school's 48 GB card suffice? No. The weights alone nearly fill the card, and the deployed estimate is about 17 GB over the 48 GB limit.
+
+
+2. Vector Database Sizing
+
+Workload:
+chunks = 5,000,000
+dimensions = 1,536
+
+Chosen precision:
+I chose halfvec / float16 precision at 2 bytes per dimension. This cuts vector storage in half compared with float32 while preserving more ranking accuracy than int8. For a ministry RAG system, retrieval quality matters because staff may search policy, pastoral-care, donor, HR, and school records, so half precision is a good balance between cost and accuracy.
+
+Formula:
+raw vector storage = number of vectors * dimensions * bytes per dimension
+HNSW estimate = raw vector storage * 0.10
+estimated vector store = raw vector storage + HNSW estimate
+
+raw vector storage = 5,000,000 * 1,536 * 2 = 15,360,000,000 bytes = 15.36 GB, about 14.31 GiB
+HNSW overhead = 15,360,000,000 * 0.10 = 1,536,000,000 bytes = 1.54 GB, about 1.43 GiB
+estimated vector store = 16,896,000,000 bytes = 16.90 GB, about 15.73 GiB
+
+pgvector proof:
+SQL size query to run after loading the table and HNSW index:
+SELECT pg_size_pretty(pg_total_relation_size('documents_embedding_idx')) AS hnsw_index_size,
+       pg_size_pretty(pg_total_relation_size('documents')) AS table_size;
+
+Measured output: pgvector was not available in this editing environment, so I am using the formula estimate as the sizing proof and marking the SQL command that should be run in the course VM. Expected measured output should be close to the 16.90 GB vector-plus-index estimate, with extra PostgreSQL overhead from rows, metadata, WAL, and index build settings.
+
+Comparison to estimate:
+The estimate says the raw embeddings plus a 10 percent HNSW allowance should be about 16.90 GB. If the measured pgvector table is much larger than that, I would check whether vectors were stored as float32 instead of halfvec, whether the table includes large text chunks, or whether additional indexes and WAL files are being counted.
+
+
+3. Dataset Sizing
+
+RAG corpus assumptions:
+number of source documents = 20,000 ministry, school, finance, policy, HR, and communications files
+average document size = 500 KB after export to text/PDF-friendly storage
+derived total corpus size = 20,000 * 500 KB = 10,000,000 KB = about 10 GB
+restricted/nonrestricted split = 25 percent restricted or confidential, about 2.5 GB; 75 percent internal/public, about 7.5 GB
+
+Fine-tuning dataset assumptions:
+number of Q&A records = 50,000 approved examples
+average record size = 8 KB per prompt, response, metadata, and label
+derived total dataset size = 50,000 * 8 KB = 400,000 KB = about 400 MB
+fine-tuned outputs are reproducible if the source dataset, training script, base model version, hyperparameters, and adapter checkpoint are retained. The source dataset and final approved adapter are more important than temporary training scratch files.
+
+Logs and scratch assumptions:
+expected log volume per day/week/month = 250 MB per day, about 1.75 GB per week, about 7.5 GB per month
+log retention = 180 days for operational and security review, which is about 45 GB before compression
+scratch space needed during ingestion, embedding, indexing, and tuning = 200 GB fast local scratch so indexing and conversion jobs can spill temporary files without filling the production database volume
+
+
+4. Total Estate Size
+
+Total active estimate:
+13B model weights = 6.5 GB
+70B model weights for comparison/archive only = 35.0 GB
+vector database embeddings and HNSW index = 16.9 GB
+RAG source corpus = 10.0 GB
+fine-tuning source dataset = 0.4 GB
+fine-tuned adapters/checkpoints = 1.0 GB
+application/query logs for 180 days = 45.0 GB
+embedding/indexing scratch space = 200.0 GB
+backup/export working allowance = 60.0 GB
+estimated total = 374.8 GB
+
+Provisioning recommendation:
+Although the calculated active estate is about 375 GB, I would not buy only 375 GB. I would provision 1 TB of fast encrypted NVMe for the active AI estate and 2 TB of encrypted backup/archive storage. This gives room for database growth, re-indexing, duplicate staging copies, and future course or ministry records.
+
+One-sentence buying statement:
+This plan buys approximately 3 TB of raw storage, split across 1 TB fast encrypted NVMe for active service and 2 TB encrypted backup/archive storage, because the calculated 375 GB estate needs growth room, safe rebuild space, and recoverable copies of irreplaceable data.
+
+
+5. Storage Audit Evidence
+
+Command run:
+./code/storage_audit.sh
+
+Relevant output:
+Local audit output captured while completing this draft:
+Filesystem     Type     Size  Used Avail Use% Mounted on
+none           overlay  8.0E   11M  8.0E   1% /
+none           9p       838G  327G  511G  39% /caas_toolbox
+
+lsblk note: this editing container does not expose /sys/dev/block, so lsblk could not read block-device data here. On the course VM, the same read-only audit script prints NAME, SIZE, TYPE, ROTA, FSTYPE, and MOUNTPOINT. For the tiering decision below, the important signal is ROTA=0 for SSD/NVMe active storage versus ROTA=1 for slower spinning/archive storage.
+
+Interpretation:
+The active vector database, HNSW index, 13B model weights, and runtime files belong on fast encrypted local NVMe or SSD storage because they affect startup, retrieval latency, and query response time. RAG source documents and backups can use encrypted warm or archive storage because they are read less often and are more important for recovery than for low-latency serving. Scratch space should be fast but disposable, because it can be recreated during ingestion or indexing.
+
+
+6. Tiering Table
+
+Asset | Tier | IOPS/throughput justification | Keep/cast-away verdict
+--- | --- | --- | ---
+13B model weights | Fast encrypted local NVMe/SSD | Loaded at service startup and may be memory-mapped; startup and reload speed matter | Keep while deployed; reproducible from approved base model, so archive version/hash but do not keep unlimited duplicates
+70B model weights | Archive or evaluation storage, not active serving tier | Too large for the 48 GB card; storing it on fast production storage wastes space | Cast away from active deployment; keep only if a future 80 GB GPU plan is approved
+Served model runtime/KV cache | GPU VRAM and temporary local runtime storage | Directly affects live inference latency and concurrent requests | Cast away after session/restart; runtime cache is reproducible and should not be retained
+Vector database embeddings | Fast encrypted NVMe/SSD database tier | High random-read workload during similarity search | Keep while corpus is active; rebuildable from source corpus but expensive enough to back up periodically
+HNSW index | Fast encrypted NVMe/SSD database tier | Search depends on index traversal, so low latency matters | Keep while active; reproducible from embeddings, so rebuild rather than preserve forever
+RAG source corpus | Encrypted warm storage with restricted access | Read during ingestion and occasional source verification, not every query | Keep; this is irreplaceable institutional evidence and must be protected
+Fine-tuning source dataset | Encrypted restricted storage | Small but sensitive because it may contain approved answers and examples | Keep approved version; irreplaceable training record and audit source
+Fine-tuned weights/adapters | Fast serving storage plus encrypted archive copy | Needed for model behavior and can be loaded during deployment | Keep final approved adapter and hash; delete failed experiments
+Application/query logs | Encrypted log storage/SIEM or warm storage | Sequential writes and review searches, not high-performance serving | Keep 180 days, then delete or aggregate; becomes liability if kept too long
+Embedding/indexing scratch space | Fast disposable NVMe scratch | Temporary high-write workload during chunking, embedding, and index builds | Cast away after successful job verification; contains duplicated sensitive data
+Backups/exports | Encrypted backup/archive storage, preferably separate from production | Optimized for recovery, not low latency | Keep according to retention schedule; verify restore, then expire old copies
+
+
+7. Recommendation
+
+I recommend that Grace & Mercy Lutheran Ministries deploy the 13B INT4 model first and not deploy the 70B model on the current 48 GB GPU. The 13B model is estimated to need about 20 GB of deployed VRAM, so the 48 GB card is enough with room for KV cache, runtime overhead, and limited concurrency. The 70B INT4 model is estimated at about 65 GB deployed VRAM, so it requires an 80 GB GPU class or a multi-GPU design.
+
+For storage, I recommend buying about 3 TB raw: 1 TB fast encrypted NVMe for active serving, vector search, HNSW indexing, model files, and scratch work, plus 2 TB encrypted backup/archive storage for the source corpus, fine-tuning records, approved adapters, and recovery exports. The active calculated estate is about 375 GB, but the extra space is necessary because indexing, re-ingestion, database growth, and backups temporarily create duplicate copies.
+
+The data that must stay on-premises includes restricted student, donor, HR, counseling, pastoral-care, and financial records. The irreplaceable assets are the RAG source corpus, approved fine-tuning source dataset, policy decisions, audit evidence, and final approved adapter/checkpoint. The reproducible assets are base model downloads, HNSW indexes, temporary embeddings, runtime caches, and scratch files. Query logs, scratch copies, failed experiments, and old exports become liability if they are kept longer than the retention window because they can contain sensitive prompts, user behavior, or duplicated restricted records.
